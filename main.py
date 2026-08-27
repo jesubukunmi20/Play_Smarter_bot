@@ -315,7 +315,19 @@ def send_help(message):
     help_text = (
         "📖 **Commands**\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "• `/start` - Main menu\n"
+        "• `/start` - 🎮 Welcome to Play Smarter, {first_name}!
+
+I'm here to help you level up your gaming skills — completely free.
+
+Here's what you can do:
+📅 Get a daily gaming tip
+📊 Track your stats & points
+🏆 Compete on the leaderboard
+📂 Browse tips by category
+
+Tap a button below to get started!
+[ 📅 Daily Tip ]  [ 📂 Categories ]
+[ 📊 My Stats ]   [ 🏆 Leaderboard ]\n"
         "• `/tip` - Get daily gaming tip\n"
         "• `/categories` - Browse tip categories\n"
         "• `/stats` - Your stats\n"
