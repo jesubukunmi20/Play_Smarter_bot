@@ -1,321 +1,38 @@
-import os
 import logging
-import datetime
-import random
-from telebot import TeleBot, types
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# Configure logging
+# Enable logging
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
+logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-if not BOT_TOKEN:
-    logging.error("TELEGRAM_BOT_TOKEN environment variable not set!")
-    exit(1)
+# ===== DATABASE (In-memory for demo - use a real DB for production) =====
+users_data = {}
 
-bot = TeleBot(BOT_TOKEN)
-
-# Simple in-memory storage (for production, use a database)
-user_data = {}  # user_id: {"points": 0, "last_visit": None, "streak": 0, "total_visits": 0}
-
-# Daily tips database
-DAILY_TIPS = [
-    {
-        "title": "🎯 Practice Regularly",
-        "tip": "Consistent practice is key to improvement. Spend at least 15-30 minutes daily on your favorite game."
-    },
-    {
-        "title": "📚 Study Pro Players",
-        "tip": "Watch professional players and content creators to learn advanced strategies and techniques."
-    },
-    {
-        "title": "💪 Focus on Fundamentals",
-        "tip": "Master the basics before trying advanced techniques. Strong fundamentals win games."
-    },
-    {
-        "title": "🧠 Analyze Your Gameplay",
-        "tip": "Review your matches to identify mistakes and areas for improvement."
-    },
-    {
-        "title": "🎮 Optimize Your Settings",
-        "tip": "Adjust your sensitivity, graphics, and controls for the best performance."
-    },
-    {
-        "title": "💧 Stay Hydrated",
-        "tip": "Drink water during gaming sessions to maintain focus and performance."
-    },
-    {
-        "title": "🔄 Take Breaks",
-        "tip": "Take a 5-10 minute break every hour to avoid fatigue and maintain sharpness."
-    },
-    {
-        "title": "👥 Join a Community",
-        "tip": "Connect with other players to share tips, strategies, and learn together."
-    },
-    {
-        "title": "📝 Set Goals",
-        "tip": "Set specific, achievable goals for each gaming session to track your progress."
-    },
-    {
-        "title": "⚡ Warm Up First",
-        "tip": "Start each session with a warm-up routine to get your reflexes ready."
-    },
-    {
-        "title": "🎯 Focus on One Thing",
-        "tip": "Work on one specific skill at a time for faster improvement."
-    },
-    {
-        "title": "🧘 Stay Calm",
-        "tip": "Keep a calm mindset during games. Tilt leads to poor decisions."
-    },
-    {
-        "title": "📊 Track Your Stats",
-        "tip": "Monitor your performance metrics to identify strengths and weaknesses."
-    },
-    {
-        "title": "🎵 Find Your Focus Music",
-        "tip": "Background music or white noise can help maintain concentration."
-    },
-    {
-        "title": "💪 Exercise Regularly",
-        "tip": "Physical exercise improves reaction time and mental clarity for gaming."
-    }
-]
-
-# Streak multipliers (for bonus points)
-STREAK_MULTIPLIERS = {
-    0: 1.0, 1: 1.0, 2: 1.1, 3: 1.2, 4: 1.3,
-    5: 1.5, 7: 2.0, 10: 2.5, 15: 3.0, 30: 5.0
-}
-
-# Gaming categories
-CATEGORIES = {
-    "strategy": {
-        "emoji": "🧠",
-        "name": "Strategy Tips",
-        "tips": [
-            "Always plan your moves ahead",
-            "Think about your opponent's strategy",
-            "Positioning is more important than speed",
-            "Learn from each loss"
-        ]
-    },
-    "aim": {
-        "emoji": "🎯",
-        "name": "Aim Improvement",
-        "tips": [
-            "Practice aiming daily for 10 minutes",
-            "Use aim trainers to improve",
-            "Adjust sensitivity to your comfort",
-            "Focus on crosshair placement"
-        ]
-    },
-    "mental": {
-        "emoji": "🧘",
-        "name": "Mental Game",
-        "tips": [
-            "Stay positive even when losing",
-            "Take deep breaths during intense moments",
-            "Don't blame teammates",
-            "Learn from mistakes"
-        ]
-    },
-    "settings": {
-        "emoji": "⚙️",
-        "name": "Settings Optimize",
-        "tips": [
-            "Optimize graphics for performance",
-            "Find your perfect sensitivity",
-            "Customize keybindings",
-            "Use good peripherals"
-        ]
-    }
-}
-
-# --- Helper Functions ---
-
-def get_streak_multiplier(streak):
-    """Get multiplier based on streak length"""
-    if streak >= 30:
-        return STREAK_MULTIPLIERS[30]
-    elif streak >= 15:
-        return STREAK_MULTIPLIERS[15]
-    elif streak >= 10:
-        return STREAK_MULTIPLIERS[10]
-    elif streak >= 7:
-        return STREAK_MULTIPLIERS[7]
-    elif streak >= 5:
-        return STREAK_MULTIPLIERS[5]
-    elif streak >= 3:
-        return STREAK_MULTIPLIERS[3]
-    elif streak >= 2:
-        return STREAK_MULTIPLIERS[2]
-    else:
-        return STREAK_MULTIPLIERS[0]
-
-def get_daily_tip():
-    """Get random daily tip"""
-    return random.choice(DAILY_TIPS)
-
-def get_category_tips(category):
-    """Get tips for specific category"""
-    if category in CATEGORIES:
-        return CATEGORIES[category]["tips"]
-    return []
-
-def can_visit(user_id):
-    """Check if user can visit today"""
-    if user_id not in user_data:
-        return True, None
-    
-    last_visit = user_data[user_id].get("last_visit")
-    if not last_visit:
-        return True, None
-    
-    today = datetime.datetime.now().date()
-    last_date = datetime.datetime.fromisoformat(last_visit).date()
-    
-    if today > last_date:
-        return True, None
-    elif today == last_date:
-        return False, "✅ You already visited today!"
-    else:
-        return True, None
-
-def calculate_points(user_id):
-    """Calculate points with streak multiplier"""
-    base_points = random.randint(5, 15)
-    streak = user_data.get(user_id, {}).get("streak", 0)
-    multiplier = get_streak_multiplier(streak)
-    points = int(base_points * multiplier)
-    
-    # Random bonus (10% chance)
-    if random.random() < 0.10:
-        points = points * 2
-        return points, "🎉 DOUBLE POINTS!"
-    
-    return points, ""
-
-def format_daily_tip_message(user_id, tip, points, points_type):
-    """Format daily tip message"""
-    user_name = user_data[user_id].get("name", "User")
-    total_points = user_data[user_id]["points"]
-    streak = user_data[user_id]["streak"]
-    
-    message = (
-        f"🎮 **Daily Gaming Tip**\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 **Player:** {user_name}\n"
-        f"📅 **Day:** {streak}\n\n"
-        f"**{tip['title']}**\n"
-        f"{tip['tip']}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"⭐ **Points:** +{points}\n"
-        f"{points_type}\n"
-        f"📊 **Total:** {total_points} points\n"
-        f"🔥 **Streak:** {streak} days\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-    )
-    
-    # Motivational messages
-    if streak >= 30:
-        message += "\n🏆 **GAMING LEGEND!** 30-day streak!"
-    elif streak >= 15:
-        message += "\n🌟 **AMAZING!** 15 days of learning!"
-    elif streak >= 7:
-        message += "\n⭐ **GREAT!** One week of smart play!"
-    elif streak >= 3:
-        message += "\n💪 **Keep going!** You're improving!"
-    elif streak == 1:
-        message += "\n🎯 **Day 1!** Come back for more tips!"
-    
-    return message
-
-def get_leaderboard():
-    """Get top 10 users by points"""
-    sorted_users = sorted(user_data.items(), key=lambda x: x[1]["points"], reverse=True)
-    return sorted_users[:10]
-
-# --- Command Handlers ---
-
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    """Welcome message"""
-    user_id = message.from_user.id
-    user_name = message.from_user.first_name
-    
-    if user_id not in user_data:
-        user_data[user_id] = {
+def get_user_data(user_id):
+    if user_id not in users_data:
+        users_data[user_id] = {
             "points": 0,
-            "last_visit": None,
             "streak": 0,
-            "total_visits": 0,
-            "name": user_name
+            "last_tip_date": None,
+            "tips_received": []
         }
+    return users_data[user_id]
+
+# ===== COMMAND HANDLERS =====
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send a welcome message when /start is issued."""
+    user = update.effective_user
+    user_id = user.id
+    first_name = user.first_name
     
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("🎯 Daily Tip", callback_data="daily_tip"),
-        InlineKeyboardButton("📂 Categories", callback_data="categories")
-    )
-    markup.add(
-        InlineKeyboardButton("📊 My Stats", callback_data="my_stats"),
-        InlineKeyboardButton("🏆 Leaderboard", callback_data="leaderboard")
-    )
-    markup.add(
-        InlineKeyboardButton("ℹ️ About", callback_data="about")
-    )
+    # Initialize user data
+    get_user_data(user_id)
     
-    welcome_text = (
-        f"👋 Welcome, {user_name}!\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🎮 **Play Smarter**\n\n"
-        f"Level up your gaming skills!\n"
-        f"• 🎯 Daily gaming tips\n"
-        f"• 📂 Strategy categories\n"
-        f"• ⭐ Earn points\n"
-        f"• 🔥 Build streaks\n"
-        f"• 🏆 Compete on leaderboard\n\n"
-        f"**Start learning now:**"
-    )
-    
-    bot.send_message(
-        message.chat.id,
-        welcome_text,
-        parse_mode='Markdown',
-        reply_markup=markup
-    )
-
-@bot.message_handler(commands=['tip'])
-def daily_tip_command(message):
-    """Get daily tip via command"""
-    handle_daily_tip(message.chat.id, message.from_user.id)
-
-@bot.message_handler(commands=['categories'])
-def categories_command(message):
-    """Show categories via command"""
-    handle_categories(message.chat.id)
-
-@bot.message_handler(commands=['stats'])
-def stats_command(message):
-    """Show stats via command"""
-    handle_stats(message.chat.id, message.from_user.id)
-
-@bot.message_handler(commands=['leaderboard'])
-def leaderboard_command(message):
-    """Show leaderboard via command"""
-    handle_leaderboard(message.chat.id)
-
-@bot.message_handler(commands=['help'])
-def send_help(message):
-    """Help command"""
-    help_text = (
-        "📖 **Commands**\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "• `/start` - 🎮 Welcome to Play Smarter, {first_name}!
+    welcome_text = f"""🎮 Welcome to Play Smarter, {first_name}!
 
 I'm here to help you level up your gaming skills — completely free.
 
@@ -325,262 +42,378 @@ Here's what you can do:
 🏆 Compete on the leaderboard
 📂 Browse tips by category
 
-Tap a button below to get started!
-[ 📅 Daily Tip ]  [ 📂 Categories ]
-[ 📊 My Stats ]   [ 🏆 Leaderboard ]\n"
-        "• `/tip` - Get daily gaming tip\n"
-        "• `/categories` - Browse tip categories\n"
-        "• `/stats` - Your stats\n"
-        "• `/leaderboard` - Top players\n"
-        "• `/help` - This message\n\n"
-        "🎮 **How it works:**\n"
-        "Get daily gaming tips\n"
-        "Earn points for learning\n"
-        "Build streaks\n"
-        "Compete with others\n\n"
-        "📌 **Free gaming education!**"
-    )
-    bot.reply_to(message, help_text, parse_mode='Markdown')
+Tap a button below to get started!"""
 
-@bot.message_handler(func=lambda message: True)
-def handle_other_messages(message):
-    """Handle any other messages"""
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("📂 Menu", callback_data="start"))
+    keyboard = [
+        [InlineKeyboardButton("📅 Daily Tip", callback_data="tip")],
+        [InlineKeyboardButton("📂 Categories", callback_data="categories")],
+        [InlineKeyboardButton("📊 My Stats", callback_data="stats")],
+        [InlineKeyboardButton("🏆 Leaderboard", callback_data="leaderboard")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    response = (
-        "💡 **Use commands or buttons:**\n\n"
-        "• `/start` - Main menu\n"
-        "• `/tip` - Daily tip\n"
-        "• `/categories` - Browse tips\n"
-        "• `/stats` - Your stats\n"
-        "• `/leaderboard` - Top players"
-    )
-    bot.reply_to(message, response, parse_mode='Markdown', reply_markup=markup)
+    await update.message.reply_text(welcome_text, reply_markup=reply_markup)
 
-# --- Handler Functions ---
 
-def handle_daily_tip(chat_id, user_id):
-    """Handle daily tip"""
-    if user_id not in user_data:
-        bot.send_message(chat_id, "⚠️ Use /start first!", parse_mode='Markdown')
-        return
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send a help message when /help is issued."""
+    help_text = """📖 *Play Smarter - Help*
+
+*Commands:*
+/start - Main menu
+/tip - Get daily gaming tip
+/categories - Browse tip categories
+/stats - Your stats
+/leaderboard - Top players
+/help - This message
+
+*How it works:*
+• Get daily gaming tips
+• Earn points for learning
+• Build streaks
+• Compete with others
+
+*Free gaming education — no gambling!*"""
     
-    can_visit_now, message = can_visit(user_id)
-    if not can_visit_now:
-        last_visit = user_data[user_id]["last_visit"]
-        last_date = datetime.datetime.fromisoformat(last_visit).date()
-        next_date = last_date + datetime.timedelta(days=1)
-        
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("📊 My Stats", callback_data="my_stats"))
-        
-        bot.send_message(
-            chat_id,
-            f"⏰ {message}\n"
-            f"📅 **Next tip available:** {next_date.strftime('%B %d, %Y')}",
-            parse_mode='Markdown',
-            reply_markup=markup
-        )
-        return
+    keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Get daily tip
-    tip = get_daily_tip()
-    points, points_type = calculate_points(user_id)
+    await update.message.reply_text(help_text, reply_markup=reply_markup, parse_mode="Markdown")
+
+
+async def tip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send a daily gaming tip."""
+    user_id = update.effective_user.id
+    user_data = get_user_data(user_id)
+    
+    # Simple tip rotation (replace with your actual tips)
+    tips = [
+        "🎯 *Aim Improvement:* Practice tracking moving targets in aim trainers for 15 minutes daily.",
+        "🧠 *Mental Game:* Take a 5-minute break between matches to reset your focus.",
+        "⚙️ *Settings:* Lower your sensitivity gradually for better micro-adjustments.",
+        "📊 *Strategy:* Watch your replays to identify positioning mistakes.",
+        "🎮 *General:* Warm up with 10 minutes of practice mode before competitive matches."
+    ]
+    
+    tip_index = len(user_data["tips_received"]) % len(tips)
+    tip = tips[tip_index]
     
     # Update user data
-    user_data[user_id]["points"] += points
-    user_data[user_id]["total_visits"] += 1
-    user_data[user_id]["last_visit"] = datetime.datetime.now().isoformat()
-    user_data[user_id]["streak"] += 1
-    user_data[user_id]["name"] = user_data[user_id].get("name", "User")
+    user_data["points"] += 5
+    user_data["streak"] += 1
+    user_data["tips_received"].append(tip_index)
     
-    result_message = format_daily_tip_message(user_id, tip, points, points_type)
-    
-    markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("📂 Categories", callback_data="categories"),
-        InlineKeyboardButton("📊 My Stats", callback_data="my_stats")
-    )
-    markup.add(InlineKeyboardButton("🏆 Leaderboard", callback_data="leaderboard"))
-    markup.add(InlineKeyboardButton("🔄 Tomorrow's Tip", callback_data="daily_tip"))
-    
-    bot.send_message(
-        chat_id,
-        result_message,
-        parse_mode='Markdown',
-        reply_markup=markup
-    )
+    tip_text = f"""📅 *Daily Gaming Tip*
 
-def handle_categories(chat_id):
-    """Show tip categories"""
-    markup = InlineKeyboardMarkup(row_width=2)
-    for key, value in CATEGORIES.items():
-        markup.add(InlineKeyboardButton(f"{value['emoji']} {value['name']}", callback_data=f"cat_{key}"))
-    markup.add(InlineKeyboardButton("🔙 Menu", callback_data="start"))
-    
-    bot.send_message(
-        chat_id,
-        "📂 **Choose a Category:**\n"
-        "Get specific tips for your gaming style!",
-        parse_mode='Markdown',
-        reply_markup=markup
-    )
+{tip}
 
-def handle_category_tips(chat_id, category):
-    """Show tips for specific category"""
-    if category not in CATEGORIES:
-        return
-    
-    cat_data = CATEGORIES[category]
-    tips = cat_data["tips"]
-    
-    text = f"{cat_data['emoji']} **{cat_data['name']}**\n"
-    text += "━━━━━━━━━━━━━━━━━━━━\n\n"
-    
-    for i, tip in enumerate(tips, 1):
-        text += f"{i}. {tip}\n"
-    
-    text += "\n━━━━━━━━━━━━━━━━━━━━"
-    text += "\n💡 **Apply these tips to improve your game!**"
-    
-    markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("📂 More Categories", callback_data="categories"),
-        InlineKeyboardButton("🎯 Daily Tip", callback_data="daily_tip")
-    )
-    markup.add(InlineKeyboardButton("🔙 Menu", callback_data="start"))
-    
-    bot.send_message(chat_id, text, parse_mode='Markdown', reply_markup=markup)
+✨ *+5 points earned!*
+📊 Points: {user_data['points']} | Streak: {user_data['streak']} days
 
-def handle_stats(chat_id, user_id):
-    """Show user stats"""
-    if user_id not in user_data:
-        bot.send_message(chat_id, "⚠️ Use /start first!", parse_mode='Markdown')
-        return
+Come back tomorrow for another tip!"""
     
-    data = user_data[user_id]
-    streak = data["streak"]
-    total_points = data["points"]
-    total_visits = data["total_visits"]
-    multiplier = get_streak_multiplier(streak)
+    keyboard = [
+        [InlineKeyboardButton("📊 My Stats", callback_data="stats")],
+        [InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    sorted_users = sorted(user_data.items(), key=lambda x: x[1]["points"], reverse=True)
-    rank = next((i+1 for i, (uid, _) in enumerate(sorted_users) if uid == user_id), "N/A")
-    
-    stats_text = (
-        f"📊 **Your Stats**\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 **Player:** {data['name']}\n"
-        f"⭐ **Points:** {total_points}\n"
-        f"📈 **Total Visits:** {total_visits}\n"
-        f"🔥 **Streak:** {streak} days\n"
-        f"📈 **Multiplier:** {multiplier}x\n"
-        f"🏆 **Rank:** #{rank} of {len(user_data)}\n"
-        f"━━━━━━━━━━━━━━━━━━━━"
-    )
-    
-    markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("🎯 Daily Tip", callback_data="daily_tip"),
-        InlineKeyboardButton("📂 Categories", callback_data="categories")
-    )
-    markup.add(InlineKeyboardButton("🔙 Menu", callback_data="start"))
-    
-    bot.send_message(chat_id, stats_text, parse_mode='Markdown', reply_markup=markup)
+    await update.message.reply_text(tip_text, reply_markup=reply_markup, parse_mode="Markdown")
 
-def handle_leaderboard(chat_id):
-    """Show leaderboard"""
-    top_users = get_leaderboard()
+
+async def categories_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show tip categories."""
+    categories_text = """📂 *Choose a Category*
+
+Get specific tips for your gaming style!"""
+
+    keyboard = [
+        [InlineKeyboardButton("🎯 Strategy Tips", callback_data="category_strategy")],
+        [InlineKeyboardButton("🎮 Aim Improvement", callback_data="category_aim")],
+        [InlineKeyboardButton("🧠 Mental Game", callback_data="category_mental")],
+        [InlineKeyboardButton("⚙️ Settings Optimize", callback_data="category_settings")],
+        [InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    if not top_users:
-        leaderboard_text = "🏆 **Leaderboard**\n━━━━━━━━━━━━━━━━━━━━\n\nNo players yet. Be the first!"
+    await update.message.reply_text(categories_text, reply_markup=reply_markup, parse_mode="Markdown")
+
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show user stats."""
+    user_id = update.effective_user.id
+    user_data = get_user_data(user_id)
+    
+    stats_text = f"""📊 *My Stats*
+
+👤 Player: {update.effective_user.first_name}
+⭐ Points: {user_data['points']}
+🔥 Streak: {user_data['streak']} days
+📚 Tips Received: {len(user_data['tips_received'])}
+🏆 Rank: #{len(users_data)} on leaderboard
+
+Keep going! Every tip makes you smarter! 🎮"""
+    
+    keyboard = [
+        [InlineKeyboardButton("📅 Daily Tip", callback_data="tip")],
+        [InlineKeyboardButton("🏆 Leaderboard", callback_data="leaderboard")],
+        [InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(stats_text, reply_markup=reply_markup, parse_mode="Markdown")
+
+
+async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show leaderboard."""
+    if not users_data:
+        leaderboard_text = "🏆 *Leaderboard*\n\nNo players yet! Be the first to earn points! 🎮"
     else:
-        leaderboard_text = "🏆 **Leaderboard**\n━━━━━━━━━━━━━━━━━━━━\n\n"
-        for i, (user_id, data) in enumerate(top_users, 1):
-            medal = ["🥇", "🥈", "🥉"][i-1] if i <= 3 else f"{i}."
-            name = data.get("name", "Player")
+        # Sort users by points (descending)
+        sorted_users = sorted(users_data.items(), key=lambda x: x[1]["points"], reverse=True)
+        
+        leaderboard_text = "🏆 *Leaderboard*\n\n"
+        for i, (user_id, data) in enumerate(sorted_users[:10], 1):
+            # Get username (in a real bot, you'd store this)
+            name = f"Player_{user_id}"  # Placeholder
             points = data["points"]
-            streak = data.get("streak", 0)
-            leaderboard_text += f"{medal} **{name}** - {points} pts (🔥{streak}d)\n"
+            streak = data["streak"]
+            
+            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+            leaderboard_text += f"{medal} {name} - {points} pts ({streak}d)\n"
     
-    markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("🎯 Daily Tip", callback_data="daily_tip"),
-        InlineKeyboardButton("📊 My Stats", callback_data="my_stats")
-    )
-    markup.add(InlineKeyboardButton("🔙 Menu", callback_data="start"))
+    keyboard = [
+        [InlineKeyboardButton("📊 My Stats", callback_data="stats")],
+        [InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    bot.send_message(chat_id, leaderboard_text, parse_mode='Markdown', reply_markup=markup)
+    await update.message.reply_text(leaderboard_text, reply_markup=reply_markup, parse_mode="Markdown")
 
-# --- Callback Handlers ---
 
-@bot.callback_query_handler(func=lambda call: True)
-def handle_callback(call):
-    """Handle button clicks"""
-    try:
-        if call.data == "start":
-            send_welcome(call.message)
-            bot.answer_callback_query(call.id)
-            
-        elif call.data == "daily_tip":
-            handle_daily_tip(call.message.chat.id, call.from_user.id)
-            bot.answer_callback_query(call.id)
-            
-        elif call.data == "categories":
-            handle_categories(call.message.chat.id)
-            bot.answer_callback_query(call.id)
-            
-        elif call.data.startswith("cat_"):
-            category = call.data.replace("cat_", "")
-            handle_category_tips(call.message.chat.id, category)
-            bot.answer_callback_query(call.id)
-            
-        elif call.data == "my_stats":
-            handle_stats(call.message.chat.id, call.from_user.id)
-            bot.answer_callback_query(call.id)
-            
-        elif call.data == "leaderboard":
-            handle_leaderboard(call.message.chat.id)
-            bot.answer_callback_query(call.id)
-            
-        elif call.data == "about":
-            about_text = (
-                "🤖 **About Play Smarter**\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
-                "Level up your gaming skills!\n\n"
-                "✅ Daily gaming tips\n"
-                "✅ Strategy categories\n"
-                "✅ Earn points\n"
-                "✅ Build streaks\n"
-                "✅ Compete on leaderboard\n\n"
-                "📌 **Free gaming education**\n"
-                "🎯 **No gambling. Just skills.**\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                f"👥 {len(user_data)} players"
-            )
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("🔙 Menu", callback_data="start"))
-            
-            bot.edit_message_text(
-                about_text,
-                call.message.chat.id,
-                call.message.message_id,
-                parse_mode='Markdown',
-                reply_markup=markup
-            )
-            bot.answer_callback_query(call.id)
-            
-    except Exception as e:
-        logging.error(f"Callback error: {e}")
-        bot.answer_callback_query(call.id, text="❌ Error", show_alert=True)
+# ===== CALLBACK QUERY HANDLERS =====
 
-# --- Main Execution ---
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle button callbacks."""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    user_id = update.effective_user.id
+    user_data = get_user_data(user_id)
+    
+    if data == "menu":
+        # Return to main menu
+        first_name = update.effective_user.first_name
+        welcome_text = f"""🎮 Welcome back, {first_name}!
 
-if __name__ == '__main__':
-    logging.info("🚀 Play Smarter Bot is starting...")
-    logging.info(f"✅ Bot online! Players: {len(user_data)}")
-    try:
-        bot.infinity_polling(timeout=10, long_polling_timeout=5)
-    except Exception as e:
-        logging.error(f"Bot polling failed: {e}")
+What would you like to do?"""
+        
+        keyboard = [
+            [InlineKeyboardButton("📅 Daily Tip", callback_data="tip")],
+            [InlineKeyboardButton("📂 Categories", callback_data="categories")],
+            [InlineKeyboardButton("📊 My Stats", callback_data="stats")],
+            [InlineKeyboardButton("🏆 Leaderboard", callback_data="leaderboard")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(welcome_text, reply_markup=reply_markup)
+    
+    elif data == "tip":
+        # Same logic as /tip command
+        tips = [
+            "🎯 *Aim Improvement:* Practice tracking moving targets in aim trainers for 15 minutes daily.",
+            "🧠 *Mental Game:* Take a 5-minute break between matches to reset your focus.",
+            "⚙️ *Settings:* Lower your sensitivity gradually for better micro-adjustments.",
+            "📊 *Strategy:* Watch your replays to identify positioning mistakes.",
+            "🎮 *General:* Warm up with 10 minutes of practice mode before competitive matches."
+        ]
+        
+        tip_index = len(user_data["tips_received"]) % len(tips)
+        tip = tips[tip_index]
+        
+        user_data["points"] += 5
+        user_data["streak"] += 1
+        user_data["tips_received"].append(tip_index)
+        
+        tip_text = f"""📅 *Daily Gaming Tip*
+
+{tip}
+
+✨ *+5 points earned!*
+📊 Points: {user_data['points']} | Streak: {user_data['streak']} days
+
+Come back tomorrow for another tip!"""
+        
+        keyboard = [
+            [InlineKeyboardButton("📊 My Stats", callback_data="stats")],
+            [InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(tip_text, reply_markup=reply_markup, parse_mode="Markdown")
+    
+    elif data == "categories":
+        categories_text = """📂 *Choose a Category*
+
+Get specific tips for your gaming style!"""
+        
+        keyboard = [
+            [InlineKeyboardButton("🎯 Strategy Tips", callback_data="category_strategy")],
+            [InlineKeyboardButton("🎮 Aim Improvement", callback_data="category_aim")],
+            [InlineKeyboardButton("🧠 Mental Game", callback_data="category_mental")],
+            [InlineKeyboardButton("⚙️ Settings Optimize", callback_data="category_settings")],
+            [InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(categories_text, reply_markup=reply_markup, parse_mode="Markdown")
+    
+    elif data == "stats":
+        stats_text = f"""📊 *My Stats*
+
+👤 Player: {update.effective_user.first_name}
+⭐ Points: {user_data['points']}
+🔥 Streak: {user_data['streak']} days
+📚 Tips Received: {len(user_data['tips_received'])}
+🏆 Rank: #{len(users_data)} on leaderboard
+
+Keep going! Every tip makes you smarter! 🎮"""
+        
+        keyboard = [
+            [InlineKeyboardButton("📅 Daily Tip", callback_data="tip")],
+            [InlineKeyboardButton("🏆 Leaderboard", callback_data="leaderboard")],
+            [InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(stats_text, reply_markup=reply_markup, parse_mode="Markdown")
+    
+    elif data == "leaderboard":
+        if not users_data:
+            leaderboard_text = "🏆 *Leaderboard*\n\nNo players yet! Be the first to earn points! 🎮"
+        else:
+            sorted_users = sorted(users_data.items(), key=lambda x: x[1]["points"], reverse=True)
+            
+            leaderboard_text = "🏆 *Leaderboard*\n\n"
+            for i, (uid, data_dict) in enumerate(sorted_users[:10], 1):
+                name = f"Player_{uid}"  # Placeholder
+                points = data_dict["points"]
+                streak = data_dict["streak"]
+                
+                medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+                leaderboard_text += f"{medal} {name} - {points} pts ({streak}d)\n"
+        
+        keyboard = [
+            [InlineKeyboardButton("📊 My Stats", callback_data="stats")],
+            [InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(leaderboard_text, reply_markup=reply_markup, parse_mode="Markdown")
+    
+    # Category handlers
+    elif data.startswith("category_"):
+        category = data.replace("category_", "")
+        category_names = {
+            "strategy": "🎯 Strategy Tips",
+            "aim": "🎮 Aim Improvement", 
+            "mental": "🧠 Mental Game",
+            "settings": "⚙️ Settings Optimize"
+        }
+        
+        # Sample tips for each category (replace with your actual content)
+        category_tips = {
+            "strategy": """🎯 *Strategy Tips*
+
+1. Watch your replays to identify positioning mistakes.
+2. Communicate with your team before the match starts.
+3. Always have an escape route planned.
+4. Play the objective, not just for kills.
+5. Learn from your deaths — what could you have done differently?""",
+            
+            "aim": """🎮 *Aim Improvement*
+
+1. Practice tracking moving targets daily.
+2. Lower your sensitivity for micro-adjustments.
+3. Keep crosshair at head level at all times.
+4. Warm up with flick shots before matches.
+5. Focus on your breathing for steady aim.""",
+            
+            "mental": """🧠 *Mental Game*
+
+1. Take breaks between matches to reset.
+2. Focus on what you can control, not your teammates.
+3. Stay positive — tilt leads to mistakes.
+4. Set small goals for each match.
+5. Learn to enjoy the process, not just winning.""",
+            
+            "settings": """⚙️ *Settings Optimize*
+
+1. Lower graphics for higher FPS.
+2. Use a consistent sensitivity across all games.
+3. Optimize crosshair color for visibility.
+4. Adjust audio settings to hear footsteps clearly.
+5. Find the right mouse DPI for your playstyle."""
+        }
+        
+        category_text = f"{category_names.get(category, 'Category')}\n\n{category_tips.get(category, 'Tips coming soon!')}"
+        
+        keyboard = [
+            [InlineKeyboardButton("📂 Back to Categories", callback_data="categories")],
+            [InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(category_text, reply_markup=reply_markup, parse_mode="Markdown")
+
+
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send settings info."""
+    settings_text = """⚙️ *Settings*
+
+📌 Use commands or buttons:
+
+/start - Main menu
+/tip - Daily gaming tip
+/categories - Browse tip categories
+/stats - Your stats
+/leaderboard - Top players
+/help - This message
+
+💡 Pro tip: Use the buttons below for quick access!"""
+    
+    keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(settings_text, reply_markup=reply_markup, parse_mode="Markdown")
+
+
+# ===== MAIN FUNCTION =====
+
+def main():
+    """Start the bot."""
+    # Create the Application
+    # ⚠️ REPLACE WITH YOUR ACTUAL BOT TOKEN
+    TOKEN = "YOUR_BOT_TOKEN_HERE"
+    application = Application.builder().token(TOKEN).build()
+
+    # Register command handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("tip", tip_command))
+    application.add_handler(CommandHandler("categories", categories_command))
+    application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("leaderboard", leaderboard_command))
+    application.add_handler(CommandHandler("settings", settings_command))
+    
+    # Register callback query handler for buttons
+    application.add_handler(CallbackQueryHandler(button_handler))
+
+    # Run the bot
+    print("🚀 Bot is running...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()
